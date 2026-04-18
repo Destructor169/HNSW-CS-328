@@ -1,0 +1,80 @@
+seed: 42
+
+# Dataset
+dataset:
+  source: benchmark
+  benchmark_name: sift1m   # or glove100
+
+  # Used when source=file
+  file:
+    path: data/raw/vectors.npy
+    delimiter: ","
+
+  # Used when source=benchmark
+  benchmark_name: sift1m
+  benchmark_registry:
+    sift1m:
+      base_path: data/benchmarks/sift1m/base.npy
+      query_path: data/benchmarks/sift1m/query.npy
+      ground_truth_path: data/benchmarks/sift1m/ground_truth.npy
+      delimiter: ","
+    glove100:
+      base_path: data/benchmarks/glove100/base.npy
+      query_path: data/benchmarks/glove100/query.npy
+      ground_truth_path: data/benchmarks/glove100/ground_truth.npy
+      delimiter: ","
+
+  synthetic:
+    n_vectors: 20000
+    dimension: 128
+    n_clusters: 40
+    cluster_std: 1.5
+  normalize: true
+  query_fraction: 0.1
+
+# Search and evaluation
+search:
+  k: 10
+
+# Default HNSW baseline
+default_hnsw:
+  m: 16
+  ef_construction: 200
+  ef_search: 100
+
+# Optimization settings
+optimization:
+  trials: 60
+  m_min: 4
+  m_max: 64
+  ef_construction_min: 50
+  ef_construction_max: 500
+  ef_search_min: 10
+  ef_search_max: 300
+  latency_weight: 0.001
+
+# Multi-objective optimization settings
+multi_objective:
+  enabled: true
+  trials: 40
+  score_recall_weight: 0.5
+  score_latency_weight: 0.25
+  score_build_time_weight: 0.15
+  score_memory_weight: 0.10
+  min_recall_for_ranking: 0.99
+
+# Output artifacts
+paths:
+  ground_truth_indices: data/ground_truth/ground_truth.npy
+  optimization_history_csv: results/optimization_history.csv
+  multi_objective_history_csv: results/multi_objective_history.csv
+  pareto_ranked_csv: results/pareto_ranked_report.csv
+  pareto_ranked_report_md: results/pareto_ranked_report.md
+  sweep_results_csv: results/parameter_sweeps.csv
+  comparison_csv: results/default_vs_learned.csv
+  report_md: results/final_report_summary.md
+  recall_vs_latency_plot: plots/recall_vs_latency.png
+  recall_vs_m_plot: plots/recall_vs_m.png
+  recall_vs_ef_search_plot: plots/recall_vs_ef_search.png
+  build_time_vs_ef_construction_plot: plots/build_time_vs_ef_construction.png
+  pareto_plot: plots/pareto_frontier.png

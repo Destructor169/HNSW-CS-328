@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.ipynb_checkpoints/
+results/*.csv
+results/*.md
+plots/*.png
+data/ground_truth/*.npy
+
+# benchmark artifacts
+data/benchmarks/
+*.hdf5
