@@ -12,5 +12,4 @@ plots/*.png
 data/ground_truth/*.npy
 
 # benchmark artifacts
-data/benchmarks/
 *.hdf5
