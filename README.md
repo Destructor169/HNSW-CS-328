@@ -29,29 +29,25 @@ to improve Recall@k while controlling latency, build time, and memory footprint.
 ## Repository Structure
 
 project/
-|
-|- data/
-|  |- raw/
-|  |- embeddings/
-|  |- ground_truth/
-|
-|- src/
-|  |- dataset_loader.py
-|  |- exact_knn.py
-|  |- hnsw_index.py
-|  |- evaluation.py
-|  |- optimization.py
-|  |- experiments.py
-|  |- visualization.py
-|
-|- configs/
-|  |- default.yaml
-|
-|- notebooks/
-|- results/
-|- plots/
-|- main.py
-|- requirements.txt
+├── data/
+│   ├── raw/
+│   ├── embeddings/
+│   └── ground_truth/
+├── src/
+│   ├── dataset_loader.py
+│   ├── exact_knn.py
+│   ├── hnsw_index.py
+│   ├── evaluation.py
+│   ├── optimization.py
+│   ├── experiments.py
+│   └── visualization.py
+├── configs/
+│   └── default.yaml
+├── notebooks/
+├── results/
+├── plots/
+├── main.py
+└── requirements.txt
 
 ## Setup
 
