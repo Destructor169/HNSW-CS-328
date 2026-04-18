@@ -1,6 +1,6 @@
 # HNSW-CS-328
 
-Learning graph construction for Approximate Nearest Neighbor (ANN) search with HNSW using data-driven parameter optimization.
+Learning graph construction for Approximate Nearest Neighbour (ANN) search with HNSW using data-driven parameter optimization.
 
 ## Project Goal
 
