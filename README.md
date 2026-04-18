@@ -14,7 +14,7 @@ to improve Recall@k while controlling latency, build time, and memory footprint.
 
 ## Implemented Pipeline
 
-1. Dataset preparation (synthetic, file-based, or benchmark registry)
+1. Dataset preparation (synthetic or file-based)
 2. Exact KNN ground-truth generation using brute-force nearest neighbors
 3. HNSW index construction and querying via hnswlib
 4. Metric evaluation: recall, latency, build time, memory
@@ -81,9 +81,8 @@ python main.py --config configs/default.yaml
 
 Edit `configs/default.yaml` to change:
 
-- dataset source (`synthetic`, `file`, or `benchmark`)
-- benchmark selection via `benchmark_name` and `benchmark_registry`
-- file or benchmark data paths (`base_path`, `query_path`, `ground_truth_path`)
+- dataset source (`synthetic` or `file`)
+- file data paths
 - synthetic dataset shape and dimension
 - normalization and split ratio
 - default HNSW baseline parameters
@@ -94,7 +93,7 @@ Edit `configs/default.yaml` to change:
 
 ### Dataset Modes
 
-The pipeline supports three config-driven dataset modes under `dataset.source`:
+The pipeline supports two config-driven dataset modes under `dataset.source`:
 
 1. `synthetic`
 - Uses `dataset.synthetic.*`
@@ -103,20 +102,6 @@ The pipeline supports three config-driven dataset modes under `dataset.source`:
 2. `file`
 - Uses `dataset.file.path`
 - Loads a single matrix (`.npy`, `.npz`, `.csv`) and splits by `query_fraction`
-
-3. `benchmark`
-- Uses `dataset.benchmark_name` to pick an entry in `dataset.benchmark_registry`
-- Loads `base_path` and optionally `query_path`
-- If `ground_truth_path` is present, it is used directly
-- Otherwise, exact ground truth is computed automatically
-
-Example benchmark switch:
-
-```yaml
-dataset:
-	source: benchmark
-	benchmark_name: sift1m
-```
 
 ## Outputs
 

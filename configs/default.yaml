@@ -2,27 +2,12 @@ seed: 42
 
 # Dataset
 dataset:
-  source: benchmark
-  benchmark_name: sift1m   # or glove100
+  source: synthetic
 
   # Used when source=file
   file:
     path: data/raw/vectors.npy
     delimiter: ","
-
-  # Used when source=benchmark
-  benchmark_name: sift1m
-  benchmark_registry:
-    sift1m:
-      base_path: data/benchmarks/sift1m/base.npy
-      query_path: data/benchmarks/sift1m/query.npy
-      ground_truth_path: data/benchmarks/sift1m/ground_truth.npy
-      delimiter: ","
-    glove100:
-      base_path: data/benchmarks/glove100/base.npy
-      query_path: data/benchmarks/glove100/query.npy
-      ground_truth_path: data/benchmarks/glove100/ground_truth.npy
-      delimiter: ","
 
   synthetic:
     n_vectors: 20000

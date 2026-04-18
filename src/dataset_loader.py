@@ -18,7 +18,6 @@ class DatasetSplit:
 @dataclass
 class PreparedDataset:
     split: DatasetSplit
-    precomputed_ground_truth_indices: Optional[np.ndarray] = None
     dataset_label: str = "unknown"
 
 
@@ -124,32 +123,8 @@ def compute_ground_truth(
     return distances, indices
 
 
-def load_indices(path: str | Path, delimiter: str = ",") -> np.ndarray:
-    """Load neighbor index matrix from .npy, .npz, or .csv."""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Ground-truth path not found: {path}")
-
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
-        data = np.load(path)
-    elif suffix == ".npz":
-        npz_data = np.load(path)
-        if not npz_data.files:
-            raise ValueError(f"No arrays found in npz file: {path}")
-        data = npz_data[npz_data.files[0]]
-    elif suffix == ".csv":
-        data = np.loadtxt(path, delimiter=delimiter)
-    else:
-        raise ValueError("Unsupported ground-truth format. Use .npy, .npz, or .csv")
-
-    if data.ndim != 2:
-        raise ValueError(f"Expected a 2D index matrix, got shape {data.shape}")
-    return data.astype(np.int64, copy=False)
-
-
 def prepare_dataset_from_config(config: Dict[str, Any], seed: int) -> PreparedDataset:
-    """Prepare a dataset split from config for synthetic, file, or benchmark sources."""
+    """Prepare a dataset split from config for synthetic or file sources."""
     source = str(config.get("source", "synthetic")).strip().lower()
     normalize = bool(config.get("normalize", True))
     query_fraction = float(config.get("query_fraction", 0.1))
@@ -179,57 +154,4 @@ def prepare_dataset_from_config(config: Dict[str, Any], seed: int) -> PreparedDa
         split = split_dataset(vectors=vectors, query_fraction=query_fraction, random_state=seed)
         return PreparedDataset(split=split, dataset_label=f"file:{file_cfg['path']}")
 
-    if source == "benchmark":
-        benchmark_name = str(config.get("benchmark_name", "")).strip().lower()
-        registry = config.get("benchmark_registry", {})
-        if not benchmark_name:
-            raise ValueError("dataset.benchmark_name must be provided when source=benchmark")
-        if benchmark_name not in registry:
-            raise ValueError(
-                f"Benchmark '{benchmark_name}' was not found in dataset.benchmark_registry"
-            )
-
-        benchmark_cfg = registry[benchmark_name]
-        if "base_path" not in benchmark_cfg:
-            raise ValueError(
-                f"dataset.benchmark_registry.{benchmark_name}.base_path is required"
-            )
-
-        base_vectors = load_dataset(
-            benchmark_cfg["base_path"],
-            delimiter=str(benchmark_cfg.get("delimiter", ",")),
-        )
-
-        if "query_path" in benchmark_cfg and benchmark_cfg["query_path"]:
-            query_vectors = load_dataset(
-                benchmark_cfg["query_path"],
-                delimiter=str(benchmark_cfg.get("delimiter", ",")),
-            )
-            if normalize:
-                base_vectors = normalize_vectors(base_vectors)
-                query_vectors = normalize_vectors(query_vectors)
-            split = DatasetSplit(
-                base_vectors=base_vectors.astype(np.float32, copy=False),
-                query_vectors=query_vectors.astype(np.float32, copy=False),
-            )
-        else:
-            if normalize:
-                base_vectors = normalize_vectors(base_vectors)
-            split = split_dataset(
-                vectors=base_vectors,
-                query_fraction=query_fraction,
-                random_state=seed,
-            )
-
-        precomputed_gt: Optional[np.ndarray] = None
-        gt_path = benchmark_cfg.get("ground_truth_path")
-        if gt_path:
-            precomputed_gt = load_indices(gt_path, delimiter=str(benchmark_cfg.get("delimiter", ",")))
-
-        return PreparedDataset(
-            split=split,
-            precomputed_ground_truth_indices=precomputed_gt,
-            dataset_label=f"benchmark:{benchmark_name}",
-        )
-
-    raise ValueError("Unsupported dataset source. Use one of: synthetic, file, benchmark")
+    raise ValueError("Unsupported dataset source. Use one of: synthetic, file")

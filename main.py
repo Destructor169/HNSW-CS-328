@@ -59,15 +59,12 @@ def _prepare_dataset(config: Dict[str, Any]) -> tuple[pd.DataFrame, Any, Any]:
     prepared = prepare_dataset_from_config(dataset_cfg, seed=int(config["seed"]))
     split = prepared.split
 
-    if prepared.precomputed_ground_truth_indices is not None:
-        gt_indices = prepared.precomputed_ground_truth_indices
-    else:
-        _, gt_indices = compute_ground_truth(
-            base_vectors=split.base_vectors,
-            query_vectors=split.query_vectors,
-            k=int(config["search"]["k"]),
-            save_path=_resolve(config["paths"]["ground_truth_indices"]),
-        )
+    _, gt_indices = compute_ground_truth(
+        base_vectors=split.base_vectors,
+        query_vectors=split.query_vectors,
+        k=int(config["search"]["k"]),
+        save_path=_resolve(config["paths"]["ground_truth_indices"]),
+    )
 
     metadata = pd.DataFrame(
         {
