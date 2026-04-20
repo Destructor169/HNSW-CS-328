@@ -15,8 +15,6 @@ This project implements and optimizes **HNSW (Hierarchical Navigable Small World
 - **Yash Patel**
 - **Harshita Singh**
 
-**Status**: ✅ Production Ready | **Version**: 1.0 | **Date**: April 21, 2026
-
 ---
 
 ## 🔬 What We're Doing
