@@ -51,22 +51,36 @@ def _run_single_config(
     ef_search: int,
     k: int,
 ) -> Dict[str, float | int]:
+    import time
     wrapper = HNSWIndexWrapper(dimension=base_vectors.shape[1])
     build_result = wrapper.build_hnsw_index(
         data=base_vectors,
         m=m,
         ef_construction=ef_construction,
     )
-    labels, _, query_time = wrapper.search_hnsw(
-        queries=query_vectors,
-        ef_search=ef_search,
-        k=k,
-    )
+    
+    # Query with per-query latency measurement
+    query_latencies_ms: list[float] = []
+    labels_list = []
+    for query in query_vectors:
+        start_time = time.perf_counter()
+        labels, _, _ = wrapper.search_hnsw(
+            queries=query.reshape(1, -1),
+            ef_search=ef_search,
+            k=k,
+        )
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        query_latencies_ms.append(latency_ms)
+        labels_list.append(labels[0])
+    
+    labels = np.array(labels_list)
+    query_time = sum(query_latencies_ms) / 1000.0
 
     metrics = summarize_metrics(
         predicted=labels,
         ground_truth=ground_truth_indices,
         query_time_seconds=query_time,
+        query_latencies_ms=query_latencies_ms,
         num_queries=query_vectors.shape[0],
         build_time_seconds=build_result.build_time_seconds,
         memory_bytes=build_result.index_size_bytes,
@@ -89,12 +103,31 @@ def optimize_hnsw_parameters(
     query_vectors: np.ndarray,
     ground_truth_indices: np.ndarray,
     config: OptimizationConfig,
+    n_startup_trials: int = 10,
+    output_dir: Any = None,
     seed: int = 42,
-) -> Tuple[optuna.Study, List[Dict[str, Any]]]:
-    """Optimize HNSW parameters using Optuna's TPE sampler."""
+) -> Dict[str, Any]:
+    """Optimize HNSW parameters using Optuna's TPE sampler.
+    
+    Args:
+        base_vectors: Index vectors
+        query_vectors: Query vectors
+        ground_truth_indices: Ground truth indices
+        config: OptimizationConfig
+        n_startup_trials: Number of random startup trials
+        output_dir: Output directory for results
+        seed: Random seed
+    
+    Returns:
+        Dictionary with results_df, best_result, and study
+    """
     history: List[Dict[str, Any]] = []
-
-    sampler = optuna.samplers.TPESampler(seed=seed)
+    
+    if n_startup_trials > 0:
+        sampler = optuna.samplers.TPESampler(seed=seed, n_startup_trials=n_startup_trials)
+    else:
+        sampler = optuna.samplers.TPESampler(seed=seed)
+    
     study = optuna.create_study(direction="maximize", sampler=sampler)
 
     def objective(trial: optuna.Trial) -> float:
@@ -128,7 +161,25 @@ def optimize_hnsw_parameters(
         return score
 
     study.optimize(objective, n_trials=config.trials)
-    return study, history
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(history).sort_values("score", ascending=False)
+    best_result = df.iloc[0].to_dict() if not df.empty else {}
+    
+    # Save if output_dir provided
+    if output_dir:
+        from pathlib import Path
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = output_dir / "bayesian_results.csv"
+        df.to_csv(csv_path, index=False)
+        print(f"\n✅ Bayesian optimization results saved to {csv_path}")
+    
+    return {
+        "results_df": df,
+        "best_result": best_result,
+        "study": study,
+    }
 
 
 def optimize_hnsw_parameters_multi_objective(
@@ -136,9 +187,22 @@ def optimize_hnsw_parameters_multi_objective(
     query_vectors: np.ndarray,
     ground_truth_indices: np.ndarray,
     config: MultiObjectiveConfig,
+    output_dir: Any = None,
     seed: int = 42,
-) -> Tuple[optuna.Study, List[Dict[str, Any]]]:
-    """Optimize for recall, latency, build time and memory simultaneously."""
+) -> Dict[str, Any]:
+    """Optimize for recall, latency, build time and memory simultaneously.
+    
+    Args:
+        base_vectors: Index vectors
+        query_vectors: Query vectors
+        ground_truth_indices: Ground truth indices
+        config: MultiObjectiveConfig
+        output_dir: Output directory for results
+        seed: Random seed
+    
+    Returns:
+        Dictionary with pareto_df, best_result, and study
+    """
     history: List[Dict[str, Any]] = []
 
     sampler = optuna.samplers.TPESampler(seed=seed)
@@ -192,7 +256,34 @@ def optimize_hnsw_parameters_multi_objective(
         return recall, latency_ms, build_time_s, memory_bytes
 
     study.optimize(objective, n_trials=config.trials)
-    return study, history
+    
+    # Build ranked Pareto report
+    pareto_df = build_ranked_pareto_report(
+        study,
+        recall_weight=config.score_recall_weight,
+        latency_weight=config.score_latency_weight,
+        build_time_weight=config.score_build_time_weight,
+        memory_weight=config.score_memory_weight,
+        min_recall_for_ranking=config.min_recall_for_ranking,
+    )
+    
+    best_result = pareto_df.iloc[0].to_dict() if not pareto_df.empty else {}
+    
+    # Save if output_dir provided
+    if output_dir:
+        from pathlib import Path
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = output_dir / "multi_objective_pareto.csv"
+        pareto_df.to_csv(csv_path, index=False)
+        print(f"\n✅ Multi-objective results saved to {csv_path}")
+    
+    return {
+        "pareto_df": pareto_df,
+        "best_result": best_result,
+        "study": study,
+    }
+
 
 
 def build_ranked_pareto_report(
