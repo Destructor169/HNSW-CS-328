@@ -17,6 +17,12 @@ This project implements and optimizes **HNSW (Hierarchical Navigable Small World
 
 ---
 
+## 🌐 Live Interactive Dashboard
+
+Streamlit app: [https://hnsw-cs328-project.streamlit.app](https://hnsw-cs328-project.streamlit.app)
+
+---
+
 ## 🔬 What We're Doing
 
 ### Phase 1: Synthetic Data Optimization ✅
