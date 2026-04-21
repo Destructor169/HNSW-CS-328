@@ -26,6 +26,45 @@ st.set_page_config(
 )
 
 
+def apply_professional_theme() -> None:
+    st.markdown(
+        """
+        <style>
+            .main .block-container {
+                padding-top: 1.5rem;
+            }
+            .intro-card {
+                background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+                border: 1px solid #334155;
+                border-radius: 14px;
+                padding: 1rem 1.1rem;
+                margin-bottom: 0.8rem;
+                color: #E2E8F0;
+            }
+            .intro-title {
+                color: #38BDF8;
+                font-weight: 700;
+                margin-bottom: 0.4rem;
+            }
+            .intro-muted {
+                color: #94A3B8;
+                font-size: 0.94rem;
+            }
+            .kpi-chip {
+                display: inline-block;
+                background: #0EA5E9;
+                color: white;
+                border-radius: 999px;
+                padding: 0.2rem 0.6rem;
+                font-size: 0.78rem;
+                margin-right: 0.35rem;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.cache_data(show_spinner=False)
 def load_config(config_path: Path) -> dict[str, Any]:
     with open(config_path, "r") as f:
@@ -160,29 +199,49 @@ def render_introduction_page() -> None:
     st.subheader("Introduction")
     st.markdown(
         """
-This project builds an end-to-end framework for **ANN (Approximate Nearest Neighbor)** search tuning using **HNSW (Hierarchical Navigable Small World)** graphs.
-
-- **ANN** is used when exact nearest-neighbor search becomes too expensive at scale.
-- **HNSW** is a graph-based ANN method that provides excellent recall/speed trade-offs.
-
-Real-world applications include:
-- semantic/vector search,
-- recommendation systems,
-- image similarity retrieval,
-- deduplication/fraud matching,
-- RAG retrieval pipelines for LLMs.
-"""
+        <div class="intro-card">
+            <div class="intro-title">HNSW + ANN at Scale</div>
+            <div>
+                This project builds an end-to-end optimization framework for <b>ANN (Approximate Nearest Neighbor)</b>
+                search using <b>HNSW (Hierarchical Navigable Small World)</b> indexes. ANN is used when exact KNN is
+                too expensive at production scale, and HNSW is one of the most practical methods for balancing
+                <b>quality</b>, <b>latency</b>, and <b>memory</b>.
+            </div>
+            <div style="margin-top:0.6rem;">
+                <span class="kpi-chip">Vector Search</span>
+                <span class="kpi-chip">Recommendations</span>
+                <span class="kpi-chip">Image Similarity</span>
+                <span class="kpi-chip">Fraud / Entity Matching</span>
+                <span class="kpi-chip">RAG Retrieval</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.markdown("### Project Structure & Workflow")
+    workflow_steps = [
+        "Data preparation (synthetic / benchmark datasets)",
+        "Ground-truth generation (exact KNN)",
+        "Hyperparameter strategy execution",
+        "Evaluation (recall, latency, throughput, build-time, memory)",
+        "Reporting (CSV + plots + markdown summaries)",
+    ]
+    selected_step = st.select_slider(
+        "Workflow navigator",
+        options=workflow_steps,
+        value=workflow_steps[0],
+    )
+    st.info(f"Current stage: **{selected_step}**")
+
     st.markdown(
         """
-1. **Data preparation** (synthetic or benchmark datasets)
-2. **Ground-truth generation** (exact KNN)
-3. **Hyperparameter strategy run** (baseline / grid / random / bayesian / multi-objective)
-4. **Evaluation** (recall, latency, throughput, memory, build-time)
-5. **Reporting** (CSV metrics + plots + markdown summaries)
-"""
+        <div class="intro-muted">
+        Strategy focus: move from a controlled baseline to broader and smarter exploration, then rank candidates by
+        business trade-offs.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.markdown("### Parameter Definitions (Broad)")
@@ -207,15 +266,38 @@ Real-world applications include:
     )
 
     st.markdown("### Hyperparameter Tuning Strategies")
+    strategy_notes = {
+        "Baseline": "Controlled one-variable sweep (typically efSearch) with fixed index topology to establish a reference curve.",
+        "Grid Search": "Exhaustive search across a bounded parameter grid; high coverage, high cost.",
+        "Random Search": "Stochastic exploration over wide ranges; often strong results with fewer trials than grid.",
+        "Bayesian Optimization": "Model-guided sampling using prior trial outcomes; efficient when evaluations are expensive.",
+        "Multi-Objective": "Optimizes multiple goals jointly (recall, latency, build-time, memory) and returns a Pareto frontier.",
+    }
+    strategy = st.radio("Select a strategy", list(strategy_notes.keys()), horizontal=True)
     st.markdown(
-        """
-- **Baseline**: one-variable sweep (usually `efSearch`) with fixed index shape.
-- **Grid Search**: exhaustive combinations; strong coverage but expensive.
-- **Random Search**: fast exploration in wide spaces.
-- **Bayesian Optimization**: model-guided trial selection for sample-efficient search.
-- **Multi-Objective Optimization**: Pareto front over recall/latency/build-time/memory.
-"""
+        f"""
+        <div class="intro-card">
+            <div class="intro-title">{strategy}</div>
+            <div>{strategy_notes[strategy]}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+    st.markdown("#### Interactive trade-off intuition")
+    c1, c2, c3 = st.columns(3)
+    m_level = c1.slider("M emphasis", 1, 10, 6)
+    efc_level = c2.slider("efConstruction emphasis", 1, 10, 5)
+    efs_level = c3.slider("efSearch emphasis", 1, 10, 7)
+
+    expected_recall = min(100, 45 + m_level * 2 + efs_level * 2)
+    expected_latency = max(1, 5 + efs_level * 2 + (m_level // 2))
+    expected_build = max(1, 4 + efc_level * 2 + (m_level // 2))
+
+    t1, t2, t3 = st.columns(3)
+    t1.metric("Estimated Recall Trend", f"{expected_recall}%")
+    t2.metric("Estimated Query Cost Trend", f"{expected_latency}/10")
+    t3.metric("Estimated Build Cost Trend", f"{expected_build}/10")
 
     cfg_path = REPO_ROOT / "configs" / "default.yaml"
     if cfg_path.exists():
@@ -468,6 +550,7 @@ def render_tuning_runner() -> None:
 
 
 def main() -> None:
+    apply_professional_theme()
     st.title("📊 HNSW-CS-328 Interactive Report & Hyperparameter Tuning")
     st.caption("Explore reports, inspect results, and launch optimization runs from one dashboard.")
 
