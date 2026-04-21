@@ -112,6 +112,179 @@ def run_cli_command(cmd: list[str]) -> tuple[int, str]:
     return process.returncode, logs.strip()
 
 
+def _extract_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
+    default_hnsw = cfg.get("default_hnsw", {})
+    # Backward compatibility with older config style
+    if not default_hnsw:
+        default_hnsw = cfg.get("models", {}).get("default_hnsw", {})
+
+    optimization = cfg.get("optimization", {})
+    multi_objective = cfg.get("multi_objective", {})
+
+    return {
+        "m": default_hnsw.get("m", "n/a"),
+        "ef_construction": default_hnsw.get("ef_construction", "n/a"),
+        "ef_search": default_hnsw.get("ef_search", "n/a"),
+        "k": cfg.get("search", {}).get("k", "n/a"),
+        "trials": optimization.get("trials", "n/a"),
+        "m_range": f"{optimization.get('m_min', 'n/a')} - {optimization.get('m_max', 'n/a')}",
+        "ef_construction_range": f"{optimization.get('ef_construction_min', 'n/a')} - {optimization.get('ef_construction_max', 'n/a')}",
+        "ef_search_range": f"{optimization.get('ef_search_min', 'n/a')} - {optimization.get('ef_search_max', 'n/a')}",
+        "latency_weight": optimization.get("latency_weight", "n/a"),
+        "mo_trials": multi_objective.get("trials", "n/a"),
+    }
+
+
+def _best_tuned_parameters() -> dict[str, Any]:
+    csv_files = discover_csv_files(RESULTS_ROOT)
+    for path in csv_files:
+        try:
+            df = load_csv(path)
+        except Exception:
+            continue
+
+        best = pick_best_row(df)
+        if best is None:
+            continue
+
+        keys = ["m", "ef_construction", "ef_search", "recall_at_10", "latency_p95_ms", "qps", "score", "recall", "latency_ms"]
+        payload = {k: best.get(k) for k in keys if k in best.index}
+        if any(k in payload for k in ("m", "ef_construction", "ef_search")):
+            payload["source_csv"] = relative(path)
+            return payload
+
+    return {}
+
+
+def render_introduction_page() -> None:
+    st.subheader("Introduction")
+    st.markdown(
+        """
+This project builds an end-to-end framework for **ANN (Approximate Nearest Neighbor)** search tuning using **HNSW (Hierarchical Navigable Small World)** graphs.
+
+- **ANN** is used when exact nearest-neighbor search becomes too expensive at scale.
+- **HNSW** is a graph-based ANN method that provides excellent recall/speed trade-offs.
+
+Real-world applications include:
+- semantic/vector search,
+- recommendation systems,
+- image similarity retrieval,
+- deduplication/fraud matching,
+- RAG retrieval pipelines for LLMs.
+"""
+    )
+
+    st.markdown("### Project Structure & Workflow")
+    st.markdown(
+        """
+1. **Data preparation** (synthetic or benchmark datasets)
+2. **Ground-truth generation** (exact KNN)
+3. **Hyperparameter strategy run** (baseline / grid / random / bayesian / multi-objective)
+4. **Evaluation** (recall, latency, throughput, memory, build-time)
+5. **Reporting** (CSV metrics + plots + markdown summaries)
+"""
+    )
+
+    st.markdown("### Parameter Definitions (Broad)")
+    st.markdown(
+        """
+- **`M`**: graph connectivity; larger values typically improve recall but increase memory/build cost.
+- **`efConstruction`**: index build effort; higher values usually improve index quality but slow build.
+- **`efSearch`**: query-time exploration budget; higher values generally improve recall but increase latency.
+- **`k`**: number of neighbors returned/evaluated.
+"""
+    )
+
+    st.markdown("### Metrics (Broad)")
+    st.markdown(
+        """
+- **Recall@k**: quality/accuracy of nearest-neighbor retrieval.
+- **Latency (p50/p95/p99)**: response-time behavior, especially tail latency.
+- **QPS**: throughput (queries per second).
+- **Build time**: indexing cost.
+- **Memory**: runtime footprint of the index.
+"""
+    )
+
+    st.markdown("### Hyperparameter Tuning Strategies")
+    st.markdown(
+        """
+- **Baseline**: one-variable sweep (usually `efSearch`) with fixed index shape.
+- **Grid Search**: exhaustive combinations; strong coverage but expensive.
+- **Random Search**: fast exploration in wide spaces.
+- **Bayesian Optimization**: model-guided trial selection for sample-efficient search.
+- **Multi-Objective Optimization**: Pareto front over recall/latency/build-time/memory.
+"""
+    )
+
+    cfg_path = REPO_ROOT / "configs" / "default.yaml"
+    if cfg_path.exists():
+        cfg = load_config(cfg_path)
+        defaults = _extract_defaults(cfg)
+
+        st.markdown("### Default Values (from config)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Default M", defaults["m"])
+        c2.metric("Default efConstruction", defaults["ef_construction"])
+        c3.metric("Default efSearch", defaults["ef_search"])
+        c4.metric("Top-k", defaults["k"])
+
+        st.markdown("#### Optimization Ranges")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("M range", defaults["m_range"])
+        r2.metric("efConstruction range", defaults["ef_construction_range"])
+        r3.metric("efSearch range", defaults["ef_search_range"])
+        r4.metric("Trials", defaults["trials"])
+
+    updated = _best_tuned_parameters()
+    st.markdown("### Updated / Best Observed Parameters")
+    if not updated:
+        st.info("No tuned result CSV found yet. Run a strategy from the HyperTune tab to populate this section.")
+    else:
+        u1, u2, u3, u4 = st.columns(4)
+        if "m" in updated:
+            u1.metric("Best M", updated["m"])
+        if "ef_construction" in updated:
+            u2.metric("Best efConstruction", updated["ef_construction"])
+        if "ef_search" in updated:
+            u3.metric("Best efSearch", updated["ef_search"])
+        if "recall_at_10" in updated:
+            u4.metric("Best Recall@10", f"{float(updated['recall_at_10']):.4f}")
+        elif "recall" in updated:
+            u4.metric("Best Recall", f"{float(updated['recall']):.4f}")
+
+        if "source_csv" in updated:
+            st.caption(f"Source: {updated['source_csv']}")
+
+
+def render_run_outputs(output_dir: Path) -> None:
+    st.markdown("### Generated Outputs")
+    if not output_dir.exists():
+        st.info(f"No output directory found at `{relative(output_dir)}`")
+        return
+
+    csv_files = discover_csv_files(output_dir)
+    png_files = discover_plot_files(output_dir)
+
+    if csv_files:
+        latest_csv = csv_files[0]
+        st.write(f"Latest CSV: `{relative(latest_csv)}`")
+        df = load_csv(latest_csv)
+        st.dataframe(df, use_container_width=True)
+
+    if png_files:
+        st.markdown("#### Plots")
+        for idx in range(0, len(png_files), 2):
+            cols = st.columns(2)
+            left = png_files[idx]
+            cols[0].image(str(left), caption=relative(left), use_container_width=True)
+            if idx + 1 < len(png_files):
+                right = png_files[idx + 1]
+                cols[1].image(str(right), caption=relative(right), use_container_width=True)
+    elif not csv_files:
+        st.info("Run completed, but no CSV/PNG artifacts were found in the output path.")
+
+
 def render_project_summary() -> None:
     st.subheader("Project Summary")
 
@@ -286,6 +459,9 @@ def render_tuning_runner() -> None:
             st.success("Run completed successfully.")
             st.text_area("CLI output", logs, height=320)
             st.cache_data.clear()
+            # Show generated artifacts immediately after a successful run
+            if strategy != "info":
+                render_run_outputs(REPO_ROOT / output_dir)
         else:
             st.error(f"Run failed with exit code {rc}")
             st.text_area("CLI output", logs, height=320)
@@ -295,9 +471,12 @@ def main() -> None:
     st.title("📊 HNSW-CS-328 Interactive Report & Hyperparameter Tuning")
     st.caption("Explore reports, inspect results, and launch optimization runs from one dashboard.")
 
-    tab_overview, tab_results, tab_tuning, tab_docs = st.tabs(
-        ["Overview", "Results", "HyperTune", "Docs"]
+    tab_intro, tab_overview, tab_results, tab_tuning, tab_docs = st.tabs(
+        ["Introduction", "Overview", "Results", "HyperTune", "Docs"]
     )
+
+    with tab_intro:
+        render_introduction_page()
 
     with tab_overview:
         render_project_summary()
