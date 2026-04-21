@@ -4,9 +4,8 @@ from __future__ import annotations
 import hashlib
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
-import mlflow
 import pandas as pd
 import typer
 import yaml
@@ -55,6 +54,25 @@ def _compute_split_hash(dataset_name: str, seed: int) -> str:
     return hashlib.md5(key.encode()).hexdigest()[:8]
 
 
+def _init_mlflow(enabled: bool, experiment_name: str, tags: dict[str, Any]) -> Any | None:
+    """Initialize MLflow lazily. Returns mlflow module or None.
+
+    This keeps CLI usable even when mlflow/protobuf stack is incompatible.
+    """
+    if not enabled:
+        return None
+
+    try:
+        import mlflow  # Lazy import to avoid module-level crash
+
+        mlflow.set_experiment(experiment_name)
+        mlflow.start_run(tags=tags)
+        return mlflow
+    except Exception as e:
+        print(f"⚠️  MLflow disabled: {type(e).__name__}: {e}")
+        return None
+
+
 @app.command()
 def baseline(
     config: str = typer.Option(
@@ -88,9 +106,11 @@ def baseline(
     # Parse efSearch values
     ef_search_list = [int(x.strip()) for x in ef_search_values.split(",")]
     
-    if mlflow_tracking:
-        mlflow.set_experiment("HNSW-Baseline")
-        mlflow.start_run(tags={"strategy": "baseline", "dataset": metadata.iloc[0]["dataset"]})
+    mlflow_client = _init_mlflow(
+        enabled=mlflow_tracking,
+        experiment_name="HNSW-Baseline",
+        tags={"strategy": "baseline", "dataset": metadata.iloc[0]["dataset"]},
+    )
     
     # Get preset model
     model_cfg = cfg.get("models", {}).get("default_hnsw", {})
@@ -157,8 +177,8 @@ def baseline(
         print(f"  efS={efs:3d}: recall@10={metrics.recall_at_10:.4f}, "
               f"p95={metrics.latency_p95_ms:.2f}ms, qps={metrics.qps:.0f}, score={score:.4f}")
         
-        if mlflow_tracking:
-            mlflow.log_metrics({
+        if mlflow_client is not None:
+            mlflow_client.log_metrics({
                 "recall_at_10": metrics.recall_at_10,
                 "latency_p95_ms": metrics.latency_p95_ms,
                 "qps": metrics.qps,
@@ -195,8 +215,8 @@ def baseline(
     # Note: Baseline doesn't have M and efConstruction variation
     print(f"ℹ️  Note: M and efConstruction are fixed in baseline, so recall_vs_m.png and build_time_vs_ef_construction.png not generated")
     
-    if mlflow_tracking:
-        mlflow.end_run()
+    if mlflow_client is not None:
+        mlflow_client.end_run()
 
 
 @app.command()
@@ -243,9 +263,11 @@ def grid(
     efc_list = [int(x.strip()) for x in ef_construction_values.split(",")]
     efs_list = [int(x.strip()) for x in ef_search_values.split(",")]
     
-    if mlflow_tracking:
-        mlflow.set_experiment("HNSW-GridSearch")
-        mlflow.start_run(tags={"strategy": "grid_search", "dataset": metadata.iloc[0]["dataset"]})
+    mlflow_client = _init_mlflow(
+        enabled=mlflow_tracking,
+        experiment_name="HNSW-GridSearch",
+        tags={"strategy": "grid_search", "dataset": metadata.iloc[0]["dataset"]},
+    )
     
     # Run grid search
     results = grid_search(
@@ -294,13 +316,13 @@ def grid(
     except Exception as e:
         print(f"ℹ️  build_time_vs_ef_construction: {type(e).__name__}")
     
-    if mlflow_tracking:
+    if mlflow_client is not None:
         best = results["best_result"]
-        mlflow.log_metrics({
+        mlflow_client.log_metrics({
             "best_recall_at_10": best["recall_at_10"],
             "best_score": best["score"],
         })
-        mlflow.end_run()
+        mlflow_client.end_run()
 
 
 @app.command()
@@ -338,9 +360,11 @@ def random(
     metadata, split, gt_indices = _prepare_dataset(cfg)
     k = int(cfg["search"]["k"])
     
-    if mlflow_tracking:
-        mlflow.set_experiment("HNSW-RandomSearch")
-        mlflow.start_run(tags={"strategy": "random_search", "dataset": metadata.iloc[0]["dataset"]})
+    mlflow_client = _init_mlflow(
+        enabled=mlflow_tracking,
+        experiment_name="HNSW-RandomSearch",
+        tags={"strategy": "random_search", "dataset": metadata.iloc[0]["dataset"]},
+    )
     
     # Run random search
     results = random_search(
@@ -394,13 +418,13 @@ def random(
     except Exception as e:
         print(f"ℹ️  build_time_vs_ef_construction: {type(e).__name__}")
     
-    if mlflow_tracking:
+    if mlflow_client is not None:
         best = results["best_result"]
-        mlflow.log_metrics({
+        mlflow_client.log_metrics({
             "best_recall_at_10": best["recall_at_10"],
             "best_score": best["score"],
         })
-        mlflow.end_run()
+        mlflow_client.end_run()
 
 
 @app.command()
@@ -451,9 +475,11 @@ def bayesian(
         latency_weight=latency_weight,
     )
     
-    if mlflow_tracking:
-        mlflow.set_experiment("HNSW-BayesianOptimization")
-        mlflow.start_run(tags={"strategy": "bayesian", "dataset": metadata.iloc[0]["dataset"]})
+    mlflow_client = _init_mlflow(
+        enabled=mlflow_tracking,
+        experiment_name="HNSW-BayesianOptimization",
+        tags={"strategy": "bayesian", "dataset": metadata.iloc[0]["dataset"]},
+    )
     
     # Run optimization
     results = optimize_hnsw_parameters(
@@ -500,12 +526,12 @@ def bayesian(
     except Exception as e:
         print(f"ℹ️  build_time_vs_ef_construction: {type(e).__name__}")
     
-    if mlflow_tracking:
-        mlflow.log_metrics({
+    if mlflow_client is not None:
+        mlflow_client.log_metrics({
             "best_recall_at_10": results["best_result"]["recall_at_10"],
             "best_score": results["best_result"]["score"],
         })
-        mlflow.end_run()
+        mlflow_client.end_run()
 
 
 @app.command()
@@ -552,9 +578,11 @@ def multi_objective(
         min_recall_for_ranking=min_recall,
     )
     
-    if mlflow_tracking:
-        mlflow.set_experiment("HNSW-MultiObjective")
-        mlflow.start_run(tags={"strategy": "multi_objective", "dataset": metadata.iloc[0]["dataset"]})
+    mlflow_client = _init_mlflow(
+        enabled=mlflow_tracking,
+        experiment_name="HNSW-MultiObjective",
+        tags={"strategy": "multi_objective", "dataset": metadata.iloc[0]["dataset"]},
+    )
     
     # Run multi-objective optimization
     results = optimize_hnsw_parameters_multi_objective(
@@ -565,12 +593,12 @@ def multi_objective(
         output_dir=output_path,
     )
     
-    if mlflow_tracking:
-        mlflow.log_metrics({
+    if mlflow_client is not None:
+        mlflow_client.log_metrics({
             "pareto_front_size": len(results["pareto_df"]),
             "best_recall_at_10": results["best_result"]["recall_at_10"],
         })
-        mlflow.end_run()
+        mlflow_client.end_run()
     
     # Generate all 5 standardized plots for multi-objective
     pareto_df = results["pareto_df"]
