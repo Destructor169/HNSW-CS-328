@@ -5,9 +5,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 import yaml
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+
+from src.dataset_loader import generate_synthetic_dataset, normalize_vectors, split_dataset
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -149,6 +155,155 @@ def run_cli_command(cmd: list[str]) -> tuple[int, str]:
     )
     logs = (process.stdout or "") + "\n" + (process.stderr or "")
     return process.returncode, logs.strip()
+
+
+@st.cache_data(show_spinner=False)
+def build_projection_from_base_query(
+    base_vectors: np.ndarray,
+    query_vectors: np.ndarray,
+    projection: str,
+    seed: int,
+    max_base_points: int,
+    max_query_points: int,
+    tsne_perplexity: int,
+    tsne_iterations: int,
+    source_label: str,
+    extra_meta: dict[str, Any] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    rng = np.random.default_rng(seed)
+    base = base_vectors
+    query = query_vectors
+
+    if len(base) > max_base_points:
+        base_idx = rng.choice(len(base), size=max_base_points, replace=False)
+        base = base[base_idx]
+
+    if len(query) > max_query_points:
+        query_idx = rng.choice(len(query), size=max_query_points, replace=False)
+        query = query[query_idx]
+
+    stacked = np.vstack([base, query]).astype(np.float32, copy=False)
+    labels = np.array(["base"] * len(base) + ["query"] * len(query))
+
+    if projection.lower() == "pca":
+        reducer = PCA(n_components=2, random_state=seed)
+        coords = reducer.fit_transform(stacked)
+        meta = {
+            "projection": "PCA",
+            "explained_var_pc1": float(reducer.explained_variance_ratio_[0]),
+            "explained_var_pc2": float(reducer.explained_variance_ratio_[1]),
+        }
+    else:
+        reducer = TSNE(
+            n_components=2,
+            perplexity=tsne_perplexity,
+            max_iter=tsne_iterations,
+            random_state=seed,
+            init="pca",
+            learning_rate="auto",
+        )
+        coords = reducer.fit_transform(stacked)
+        meta = {
+            "projection": "t-SNE",
+            "perplexity": tsne_perplexity,
+            "iterations": tsne_iterations,
+        }
+
+    df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "set": labels})
+    meta.update(
+        {
+            "source": source_label,
+            "n_base_shown": int((df["set"] == "base").sum()),
+            "n_query_shown": int((df["set"] == "query").sum()),
+            "n_base_total": int(base_vectors.shape[0]),
+            "n_query_total": int(query_vectors.shape[0]),
+            "dimension": int(base_vectors.shape[1]),
+        }
+    )
+    if extra_meta:
+        meta.update(extra_meta)
+    return df, meta
+
+
+@st.cache_data(show_spinner=False)
+def build_synthetic_projection(
+    n_vectors: int,
+    dimension: int,
+    n_clusters: int,
+    cluster_std: float,
+    query_fraction: float,
+    normalize: bool,
+    seed: int,
+    projection: str,
+    max_base_points: int,
+    max_query_points: int,
+    tsne_perplexity: int,
+    tsne_iterations: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    vectors = generate_synthetic_dataset(
+        n_vectors=n_vectors,
+        dimension=dimension,
+        n_clusters=n_clusters,
+        cluster_std=cluster_std,
+        random_state=seed,
+    )
+    if normalize:
+        vectors = normalize_vectors(vectors)
+    split = split_dataset(vectors=vectors, query_fraction=query_fraction, random_state=seed)
+    return build_projection_from_base_query(
+        base_vectors=split.base_vectors,
+        query_vectors=split.query_vectors,
+        projection=projection,
+        seed=seed,
+        max_base_points=max_base_points,
+        max_query_points=max_query_points,
+        tsne_perplexity=tsne_perplexity,
+        tsne_iterations=tsne_iterations,
+        source_label="synthetic",
+        extra_meta={
+            "n_vectors_total": int(n_vectors),
+            "n_clusters": int(n_clusters),
+            "cluster_std": float(cluster_std),
+        },
+    )
+
+
+@st.cache_data(show_spinner=False)
+def load_real_dataset(dataset_name: str) -> tuple[np.ndarray, np.ndarray]:
+    dataset_dir = REPO_ROOT / "data" / "benchmarks" / dataset_name
+    base_path = dataset_dir / "base.npy"
+    query_path = dataset_dir / "query.npy"
+
+    if not base_path.exists() or not query_path.exists():
+        raise FileNotFoundError(f"Missing files for dataset '{dataset_name}' in {dataset_dir}")
+
+    base = np.load(base_path).astype(np.float32, copy=False)
+    query = np.load(query_path).astype(np.float32, copy=False)
+    return base, query
+
+
+@st.cache_data(show_spinner=False)
+def build_real_projection(
+    dataset_name: str,
+    projection: str,
+    seed: int,
+    max_base_points: int,
+    max_query_points: int,
+    tsne_perplexity: int,
+    tsne_iterations: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    base, query = load_real_dataset(dataset_name)
+    return build_projection_from_base_query(
+        base_vectors=base,
+        query_vectors=query,
+        projection=projection,
+        seed=seed,
+        max_base_points=max_base_points,
+        max_query_points=max_query_points,
+        tsne_perplexity=tsne_perplexity,
+        tsne_iterations=tsne_iterations,
+        source_label=dataset_name,
+    )
 
 
 def _extract_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -385,6 +540,122 @@ def render_project_summary() -> None:
     st.markdown("- **Hyperparameter tuning runner** powered by your existing Typer CLIs")
 
 
+def render_synthetic_visualizer() -> None:
+    st.subheader("Dataset Visualizer")
+    st.caption("Visualize synthetic or real datasets (SIFT-1M / GloVe-100) with PCA/t-SNE and base/query overlays.")
+
+    dataset_choice = st.selectbox("Dataset", ["synthetic", "sift1m", "glove100"], index=0)
+
+    cfg_path = REPO_ROOT / "configs" / "default.yaml"
+    cfg = load_config(cfg_path) if cfg_path.exists() else {}
+    synth_cfg = cfg.get("dataset", {}).get("synthetic", {})
+    seed_default = int(cfg.get("seed", 42))
+    normalize_default = bool(cfg.get("dataset", {}).get("normalize", True))
+    query_fraction_default = float(cfg.get("dataset", {}).get("query_fraction", 0.1))
+
+    # Synthetic controls only
+    if dataset_choice == "synthetic":
+        c1, c2, c3 = st.columns(3)
+        n_vectors = c1.slider("n_vectors", min_value=2000, max_value=50000, value=int(synth_cfg.get("n_vectors", 20000)), step=1000)
+        dimension = c2.slider("dimension", min_value=8, max_value=512, value=int(synth_cfg.get("dimension", 128)), step=8)
+        n_clusters = c3.slider("n_clusters", min_value=2, max_value=200, value=int(synth_cfg.get("n_clusters", 40)), step=1)
+
+        c4, c5, c6 = st.columns(3)
+        cluster_std = c4.slider("cluster_std", min_value=0.1, max_value=5.0, value=float(synth_cfg.get("cluster_std", 1.5)), step=0.1)
+        query_fraction = c5.slider("query_fraction", min_value=0.05, max_value=0.5, value=float(query_fraction_default), step=0.01)
+        normalize = c6.toggle("L2 normalize", value=normalize_default)
+    else:
+        st.info(
+            f"Selected real dataset: **{dataset_choice}**. "
+            "Use the point sliders below to control projection size for faster visualization."
+        )
+
+    c7, c8, c9 = st.columns(3)
+    projection = c7.selectbox("Projection", options=["PCA", "t-SNE"], index=0)
+    max_base_points = c8.slider("max base points shown", min_value=500, max_value=50000, value=5000, step=500)
+    max_query_points = c9.slider("max query points shown", min_value=100, max_value=50000, value=1500, step=100)
+
+    c10, c11 = st.columns(2)
+    tsne_perplexity = c10.slider("t-SNE perplexity", min_value=5, max_value=80, value=30, step=1)
+    tsne_iterations = c11.slider("t-SNE iterations", min_value=250, max_value=2000, value=1000, step=50)
+
+    seed = st.number_input("random seed", min_value=0, max_value=10_000, value=seed_default, step=1)
+
+    with st.spinner("Preparing and projecting vectors..."):
+        if dataset_choice == "synthetic":
+            df, meta = build_synthetic_projection(
+                n_vectors=n_vectors,
+                dimension=dimension,
+                n_clusters=n_clusters,
+                cluster_std=cluster_std,
+                query_fraction=query_fraction,
+                normalize=normalize,
+                seed=int(seed),
+                projection=projection,
+                max_base_points=max_base_points,
+                max_query_points=max_query_points,
+                tsne_perplexity=tsne_perplexity,
+                tsne_iterations=tsne_iterations,
+            )
+        else:
+            try:
+                df, meta = build_real_projection(
+                    dataset_name=dataset_choice,
+                    projection=projection,
+                    seed=int(seed),
+                    max_base_points=max_base_points,
+                    max_query_points=max_query_points,
+                    tsne_perplexity=tsne_perplexity,
+                    tsne_iterations=tsne_iterations,
+                )
+            except FileNotFoundError as e:
+                st.error(str(e))
+                st.stop()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Dataset", meta.get("source", "n/a"))
+    m2.metric("Projection", meta.get("projection", "n/a"))
+    m3.metric("Base points shown", meta.get("n_base_shown", 0))
+    m4.metric("Query points shown", meta.get("n_query_shown", 0))
+
+    cmeta1, cmeta2, cmeta3 = st.columns(3)
+    cmeta1.metric("Total base vectors", meta.get("n_base_total", 0))
+    cmeta2.metric("Total query vectors", meta.get("n_query_total", 0))
+    cmeta3.metric("Dimension", meta.get("dimension", 0))
+
+    if meta.get("projection") == "PCA":
+        st.caption(
+            f"PCA explained variance: PC1={meta.get('explained_var_pc1', 0):.2%}, "
+            f"PC2={meta.get('explained_var_pc2', 0):.2%}"
+        )
+    elif meta.get("projection") == "t-SNE":
+        st.caption(
+            f"t-SNE settings: perplexity={meta.get('perplexity')}, iterations={meta.get('iterations')}"
+        )
+
+    if dataset_choice == "synthetic":
+        st.caption(
+            f"Synthetic generation: n_vectors={meta.get('n_vectors_total')}, "
+            f"n_clusters={meta.get('n_clusters')}, cluster_std={meta.get('cluster_std')}"
+        )
+
+    base_df = df[df["set"] == "base"]
+    query_df = df[df["set"] == "query"]
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    ax.scatter(base_df["x"], base_df["y"], s=20, alpha=0.55, c="#1E40AF", label="Base", marker="o")
+    ax.scatter(query_df["x"], query_df["y"], s=36, alpha=0.85, c="#EA580C", label="Query", marker="^")
+    ax.set_xlabel(f"{projection} component 1")
+    ax.set_ylabel(f"{projection} component 2")
+    ax.set_title("Synthetic embedding with base/query overlays")
+    ax.legend(loc="best")
+    ax.grid(alpha=0.2)
+    st.pyplot(fig, use_container_width=True)
+
+    with st.expander("Sample projected points"):
+        st.dataframe(df.head(200), use_container_width=True)
+
+
 def render_results_explorer() -> None:
     st.subheader("Results Explorer")
 
@@ -554,12 +825,15 @@ def main() -> None:
     st.title("📊 HNSW-CS-328 Interactive Report & Hyperparameter Tuning")
     st.caption("Explore reports, inspect results, and launch optimization runs from one dashboard.")
 
-    tab_intro, tab_overview, tab_results, tab_tuning, tab_docs = st.tabs(
-        ["Introduction", "Overview", "Results", "HyperTune", "Docs"]
+    tab_intro, tab_synth, tab_overview, tab_results, tab_tuning, tab_docs = st.tabs(
+        ["Introduction", "Synthetic Visualizer", "Overview", "Results", "HyperTune", "Docs"]
     )
 
     with tab_intro:
         render_introduction_page()
+
+    with tab_synth:
+        render_synthetic_visualizer()
 
     with tab_overview:
         render_project_summary()
